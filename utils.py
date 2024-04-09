@@ -50,7 +50,7 @@ class TimeProgress:
 
     def __init__(self, n_iters):
         self.n_iters = n_iters
-        self.timer = Timer()
+        self.timer = Timer(start=True)
         self.iter = 0
     
     def end_iter(self) -> None:
@@ -63,7 +63,7 @@ class TimeProgress:
         return dt, remaining_dt, total_dt
     
     def pretty_time_progress(self) -> str:
-        dt, remaining_dt, total_dt = get_timedeltas(self.time_progress())
+        dt, remaining_dt, total_dt = get_timedeltas(*self.time_progress())
         time_progress = f"{remaining_dt} -> {dt} / {total_dt}"
         return time_progress
     
