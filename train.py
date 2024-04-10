@@ -223,7 +223,7 @@ def estimate_loss():
             X, Y = get_batch(split)
             with ctx:
                 logits, loss = model(X, Y)
-            losses[k] = loss.item()
+            losses[k] = loss.item() / math.log(2)
         out[split] = losses.mean()
     model.train()
     return out
@@ -323,6 +323,8 @@ while True:
         # get loss as float. note: this is a CPU-GPU sync point
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
         lossf = loss.item() * gradient_accumulation_steps
+        # nats to base 2 (bpc)
+        lossf = lossf / math.log(2)
         print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms | {timer.pretty_time_progress()}")
     iter_num += 1
     local_iter_num += 1
