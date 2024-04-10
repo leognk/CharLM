@@ -325,7 +325,8 @@ while True:
         lossf = loss.item() * gradient_accumulation_steps
         # nats to base 2 (bpc)
         lossf = lossf / math.log(2)
-        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms | {timer.pretty_time_progress()}")
+        time_progress, finish_date = timer.pretty_time_progress()
+        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms | {time_progress} | {finish_date}")
     iter_num += 1
     local_iter_num += 1
     timer.end_iter()
