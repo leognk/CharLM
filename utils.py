@@ -1,5 +1,6 @@
 import time
 import datetime
+from zoneinfo import ZoneInfo
 from typing import Sequence
 
 
@@ -50,7 +51,7 @@ class Date:
 
     @staticmethod
     def now() -> datetime.datetime:
-        return datetime.datetime.now()
+        return datetime.datetime.now(ZoneInfo("Europe/Paris"))
     
     @staticmethod
     def to_str(date: datetime.datetime) -> str:
@@ -86,8 +87,9 @@ class TimeProgress:
         return current_date, finish_date
     
     def pretty_time_progress(self) -> tuple[str, str]:
-        dt, remaining_dt, total_dt = get_timedeltas(*self.time_progress())
+        dt, remaining_dt, total_dt = self.time_progress()
         current_date, finish_date = TimeProgress.get_finish_date(remaining_dt)
+        dt, remaining_dt, total_dt = get_timedeltas(dt, remaining_dt, total_dt)
         time_progress = f"{remaining_dt} -> {dt} / {total_dt}"
         finish_date = f"{current_date} -> {finish_date}"
         return time_progress, finish_date
