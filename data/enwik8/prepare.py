@@ -15,7 +15,7 @@ if not os.path.exists(data_path):
 
 data = zipfile.ZipFile(data_path).read('enwik8')
 
-print(f"length of enwik8 in bytes: {len(data)}")
+print(f"\nlength of enwik8 in bytes: {len(data)}")
 
 # get all the unique characters that occur in this text
 _bytes = set(data)
