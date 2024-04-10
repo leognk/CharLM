@@ -1,4 +1,6 @@
-out_dir = 'exp/out-enwik8'
+name = 'gpt_1'
+
+out_dir = f'exp/enwik8/{name}'
 eval_iters = 200
 
 init_from = 'resume'
