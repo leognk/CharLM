@@ -46,6 +46,21 @@ class Timer:
         self.dt = state_dict["dt"]
 
 
+class Date:
+
+    @staticmethod
+    def now() -> datetime.datetime:
+        return datetime.datetime.now()
+    
+    @staticmethod
+    def to_str(date: datetime.datetime) -> str:
+        return date.strftime("%a %d %b, %H:%M:%S")
+    
+    @staticmethod
+    def to_tuple(date: datetime.datetime) -> tuple[int]:
+        return tuple(date.timetuple())[:6]
+
+
 class TimeProgress:
 
     def __init__(self, n_iters):
@@ -62,10 +77,20 @@ class TimeProgress:
         remaining_dt = total_dt - dt
         return dt, remaining_dt, total_dt
     
-    def pretty_time_progress(self) -> str:
+    @staticmethod
+    def get_finish_date(remaining_dt: float) -> tuple[str, str]:
+        current_time = Date.now()
+        finish_time = current_time + datetime.timedelta(seconds=remaining_dt)
+        current_date = Date.to_str(current_time)
+        finish_date = Date.to_str(finish_time)
+        return current_date, finish_date
+    
+    def pretty_time_progress(self) -> tuple[str, str]:
         dt, remaining_dt, total_dt = get_timedeltas(*self.time_progress())
+        current_date, finish_date = TimeProgress.get_finish_date(remaining_dt)
         time_progress = f"{remaining_dt} -> {dt} / {total_dt}"
-        return time_progress
+        finish_date = f"{current_date} -> {finish_date}"
+        return time_progress, finish_date
     
     def pretty_iter_progress(self) -> str:
         iter_progress = f"{self.iter}/{self.n_iters} iters"
