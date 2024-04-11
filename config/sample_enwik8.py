@@ -1,7 +1,9 @@
-data_in_bytes = True
+name = 'gpt_1'
 
 init_from = 'resume'
-out_dir = 'exp/out-enwik8'
+out_dir = f'exp/enwik8/{name}'
+
+data_in_bytes = True
 
 # start = "\n"
 start = "What is the answer to life, the universe, and everything?"
