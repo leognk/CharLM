@@ -97,6 +97,7 @@ class Patchify(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.p = config.patch_size
+        self.sub_block_size = config.sub_block_size
         # self.downscale = nn.Conv1d(config.n_embd, config.n_embd, self.p, self.p)
         self.downscale = nn.AvgPool1d(self.p, self.p)
 
@@ -110,22 +111,29 @@ class Patchify(nn.Module):
         x = torch.transpose(x, 2, 1)
         xp = self.downscale(x)
         xp = torch.transpose(xp, 1, 2)
+
+        # pad tokens to match sub_block_size
+        modulo_t = xp.size(1) % self.sub_block_size
+        if modulo_t:
+            pad = self.sub_block_size - modulo_t
+            xp = torch.nn.functional.pad(xp, (0, 0, 0, pad), 'constant', value=0)
+
         return xp
 
 class Unpatchify(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.p = config.patch_size
-        self.upscale = nn.ConvTranspose1d(config.n_embd, config.n_embd, self.p, self.p)
-        # self.upscale = lambda x: repeat(x, 'b d t -> b d (t p)', p=self.p)
+        p = config.patch_size
+        self.sub_block_size = config.sub_block_size
+        self.upscale = nn.ConvTranspose1d(config.n_embd, config.n_embd, p, p)
+        # self.upscale = lambda x: repeat(x, 'b d t -> b d (t p)', p=p)
     
     def forward(self, xp):
         """shape (b, t, n_embd) -> (b, k, t, n_embd)"""
         xp = torch.transpose(xp, 2, 1)
         x = self.upscale(xp)
-        x = torch.transpose(x, 1, 2)
-        x = rearrange(x, 'b (k t) d -> b k t d', k=self.p) # split into sub-blocks
+        x = rearrange(x, 'b d (k t) -> b k t d', t=self.sub_block_size) # split into sub-blocks
         return x
 
 class Block(nn.Module):
@@ -224,13 +232,19 @@ class GPT(nn.Module):
 
     def forward(self, idx, targets=None):
         device = idx.device
-        b, t = idx.size()
-        assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        ##### !!!
+        total_t = idx.size(1)
+        sub_block_size = self.config.sub_block_size
+        
+        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, total_t, n_embd)
 
-        p = self.config.patch_size
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t x p, n_embd)
-        tok_emb = rearrange(tok_emb, 'b (k t) d -> b k t d', k=p) # split tokens into `patch_size` sub-blocks
+        # pad tokens before splitting them into sub-blocks
+        modulo_t = total_t % sub_block_size
+        if modulo_t:
+            pad = sub_block_size - modulo_t
+            tok_emb = nn.functional.pad(tok_emb, (0, 0, 0, pad), 'constant', value=0) # shape (b, n_sub_block x sub_block_size, n_embd)
+        tok_emb = rearrange(tok_emb, 'b (k t) d -> b k t d', t=sub_block_size) # split tokens into sub-blocks
+
+        # add position embeddings
         t = tok_emb.size(-2)
         pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
@@ -243,11 +257,13 @@ class GPT(nn.Module):
         x = self.transformer.drop(x)
         xp = self.transformer.drop(xp)
 
+        # forward through transformer blocks
         for block in self.transformer.h:
             x, xp = block(x, xp)
         x = self.transformer.ln_f(x)
 
-        x = rearrange(x, 'b k t d -> b (k t) d', k=p) # merge back sub-blocks
+        x = rearrange(x, 'b k t d -> b (k t) d') # merge back sub-blocks
+        x = x[:, :total_t] # undo eventual padding
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
