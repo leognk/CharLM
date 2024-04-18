@@ -98,8 +98,8 @@ class Patchify(nn.Module):
         super().__init__()
         self.p = config.patch_size
         self.sub_block_size = config.sub_block_size
-        # self.downscale = nn.Conv1d(config.n_embd, config.n_embd, self.p, self.p)
-        self.downscale = nn.AvgPool1d(self.p, self.p)
+        self.downscale = nn.Conv1d(config.n_embd, config.n_embd, self.p, self.p)
+        # self.downscale = nn.AvgPool1d(self.p, self.p)
 
     def forward(self, x):
         """shape (b, k, t, n_embd) -> (b, t, n_embd)"""
@@ -140,7 +140,6 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.patchify = Patchify(config)
         self.unpatchify = Unpatchify(config)
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
         self.attn = CausalSelfAttention(config)
@@ -152,15 +151,14 @@ class Block(nn.Module):
         x shape (b, k, t, n_embd)
         xp shape (b, t, n_embd)
         """
-        # let token and patch embeddings communicate with each other
-        x = x + self.unpatchify(xp)
-        xp = xp + self.patchify(x)
-
         # token and patch embeddings go through the same layers
         x, ps = pack([x, xp], '* t d')
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         [x, xp] = unpack(x, ps, '* t d')
+        
+        # let token and patch embeddings communicate with each other
+        x = x + self.unpatchify(xp)
         return x, xp
 
 @dataclass
