@@ -108,9 +108,9 @@ class Patchify(nn.Module):
         x = torch.roll(x, shifts=self.p - 1, dims=1)
         x[:, :self.p - 1] = 0
         # patchify tokens to obtain patch embeddings
-        x = torch.transpose(x, 2, 1)
+        x = torch.transpose(x, -1, -2)
         xp = self.downscale(x)
-        xp = torch.transpose(xp, 1, 2)
+        xp = torch.transpose(xp, -2, -1)
 
         # pad tokens to match sub_block_size
         modulo_t = xp.size(1) % self.sub_block_size
