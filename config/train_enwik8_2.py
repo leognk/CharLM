@@ -1,4 +1,4 @@
-name = 'patch'
+name = 'patch_19-p=2'
 
 out_dir = f'exp/enwik8/{name}'
 eval_interval = 1000
@@ -20,9 +20,9 @@ patch_size = 2
 block_size = patch_size * sub_block_size
 
 gradient_accumulation_steps = 1
-batch_size = 16 // patch_size
+batch_size = 32 // patch_size
 
-n_layer = 10
+n_layer = 12
 n_head = 16
 n_embd = 512
 dropout = 0.2
@@ -37,6 +37,6 @@ warmup_iters = 1000
 
 weight_decay = 1e-1
 beta1 = 0.9
-beta2 = 0.95
+beta2 = 0.999
 
 # compile = False
