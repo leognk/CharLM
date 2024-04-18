@@ -1,4 +1,4 @@
-name = 'patch'
+name = 'patch_19-p=2'
 
 out_dir = f'exp/enwik8/{name}'
 eval_iters = 200
