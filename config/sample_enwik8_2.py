@@ -1,4 +1,4 @@
-name = 'patch'
+name = 'patch_19-p=2'
 
 init_from = 'resume'
 out_dir = f'exp/enwik8/{name}'
