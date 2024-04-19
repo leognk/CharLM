@@ -1,10 +1,13 @@
 import os
-import time
+from pathlib import Path
+from tqdm import tqdm
 import math
 import pickle
 from contextlib import nullcontext
 
 import numpy as np
+import matplotlib.pyplot as plt
+
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
@@ -57,6 +60,7 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
+compute_stats = False
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -113,7 +117,8 @@ if os.path.exists(meta_path):
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout,
-                  sub_block_size=sub_block_size, patch_size=patch_size) # start with model_args from command line
+                  sub_block_size=sub_block_size, patch_size=patch_size,
+                  compute_stats=compute_stats) # start with model_args from command line
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -143,7 +148,7 @@ elif init_from == 'resume':
     for k,v in list(state_dict.items()):
         if k.startswith(unwanted_prefix):
             state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict, strict=False)
     iter_num = checkpoint['iter_num']
     best_val_loss = checkpoint['best_val_loss']
 elif init_from.startswith('gpt2'):
@@ -168,23 +173,87 @@ if compile:
     unoptimized_model = model
     model = torch.compile(model) # requires PyTorch 2.0
 
+class Stats:
+    """Average and plot the statistics that has been extracted from the model."""
+
+    def __init__(self, stats_list):
+        self.stats = self.average_stats(stats_list) # size (n_layers)
+
+    @staticmethod
+    def average_stats(stats_list):
+        """
+        Average the statistics contained in stats_list for each metric over the first axis.
+        Args:
+            - stats_list: list[list[dict]]
+        Returns:
+            - avg_stats: dict[list]
+        """
+        avg_stats = {}
+        metrics = stats_list[0][0].keys()
+        for metric in metrics:
+            stat_values = np.array([[dct[metric] for dct in list] for list in stats_list])
+            avg_stats[metric] = stat_values.mean(0).tolist()
+        return avg_stats
+    
+    def __repr__(self):
+        return str({k: [round(x, 3) for x in lst] for k, lst in self.stats.items()})
+    
+    @staticmethod
+    def plot_metric(metric, values, save_path):
+        """Plot a bar of the metric for each layer and save it."""
+        n_layers = len(values)
+        fig, ax = plt.subplots(figsize=(6, 4))
+
+        # Plotting the bars for each layer
+        for i, v in enumerate(values):
+            gray = (0.6, 0.6, 0.6)
+            ax.bar(i, 1, color=gray)
+            ax.bar(i, v, color='red', label=metric if i == 0 else '')
+
+        ax.set_yticks(np.arange(0, 1.1, 0.1))
+        ax.set_xticks(range(n_layers))
+        ax.set_xticklabels([f'{i + 1}' for i in range(n_layers)])
+
+        ax.set_xlabel('Layer')
+        ax.set_ylabel('Ratio')
+        ax.set_title(f'Ratio of {metric} per Layer')
+        ax.legend()
+
+        fig.savefig(save_path, dpi=300)
+        plt.show()
+    
+    def plot(self, save_dir):
+        """Plot and save all the metrics with bars."""
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        for metric, values in self.stats.items():
+            save_path = os.path.join(save_dir, f'{metric}.png')
+            self.plot_metric(metric, values, save_path)
+
 # helps estimate an arbitrarily accurate loss over either split using many batches
+# added the extraction of the statistics
 @torch.no_grad()
 def estimate_loss():
     out = {}
+    stats = {}
     model.eval()
     for split in ['test']:
         losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
+        stats_lst = [] # final size: (eval_iters, n_layers)
+        for k in tqdm(range(eval_iters)):
             X, Y = get_batch(split)
             with ctx:
-                logits, loss = model(X, Y)
+                logits, loss, _stats = model(X, Y)
             losses[k] = loss.item() / math.log(2)
+            stats_lst.append(_stats)
         out[split] = losses.mean()
+        stats[split] = Stats(stats_lst)
     model.train()
-    return out
+    return out, stats
 
 # evaluate the loss on test set
 timer = utils.Timer(max_iters)
-losses = estimate_loss()
+losses, stats = estimate_loss()
 print(f"test loss {losses['test']:.4f} | eval time {timer.timedelta()}")
+# display the statistics
+print(f"stats: {stats['test']}")
+stats['test'].plot(os.path.join(out_dir, 'stats'))
