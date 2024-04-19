@@ -42,13 +42,26 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+
+        self.compute_stats = config.compute_stats
+        self.patch_size = config.patch_size
+
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') \
+            and not self.compute_stats
         if not self.flash:
-            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            # print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
+            if self.compute_stats:
+                # mask used to compute how much the patches pays attention to outside the sub-block
+                patch_per_sub_block = config.sub_block_size // config.patch_size
+                self.register_buffer(
+                    "inside_mask",
+                    torch.tril(torch.ones(config.block_size, config.block_size), diagonal=-patch_per_sub_block)
+                    .view(1, 1, config.block_size, config.block_size)
+                )
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -59,6 +72,8 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
+        outside_attn = None
+
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
@@ -67,14 +82,21 @@ class CausalSelfAttention(nn.Module):
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
+            att = F.softmax(att, dim=-1) # (B, nh, T, T)
+            if self.compute_stats:
+                # Represents the amount of information contained in a token which comes
+                # from outside the current sub-block.
+                # This quantity only needs to be computed on the patches, but here, it is also
+                # computed on the character-level tokens because of batching (will be ignored afterwards).
+                outside_attn = att.masked_fill(self.inside_mask[:,:,:T,:T] == 0, 0.0)
+                outside_attn = outside_attn.sum(-1).mean(-2) # (B, T)
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
-        return y
+        return y, outside_attn
 
 class MLP(nn.Module):
 
@@ -145,6 +167,8 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
+        
+        self.compute_stats = config.compute_stats
 
     def forward(self, x, xp):
         """
@@ -153,13 +177,37 @@ class Block(nn.Module):
         """
         # token and patch embeddings go through the same layers
         x, ps = pack([x, xp], '* t d')
-        x = x + self.attn(self.ln_1(x))
+        z, outside_attn = self.attn(self.ln_1(x)) # (b, t, d), (b)
+        x = x + z
         x = x + self.mlp(self.ln_2(x))
         [x, xp] = unpack(x, ps, '* t d')
-        
-        # let token and patch embeddings communicate with each other
-        x = x + self.unpatchify(xp)
-        return x, xp
+        xu = self.unpatchify(xp) # (b, t, d) -> (b, k, t, d)
+
+        # Compute some interesting statistics
+        stats = {}
+        if self.compute_stats:
+            [_, outside_attn] = unpack(outside_attn, ps, '* t')
+            outside_attn_repeat = repeat(outside_attn, 'b t -> b (t k)', k=xu.shape[1])
+            outside_attn_repeat = rearrange(outside_attn_repeat, 'b (k t) -> b k t', k=xu.shape[1])
+
+            xu_std = xu.std(-1) # (b k t)
+            x_std = x.std(-1) # (b k t)
+            patch_contrib = xu_std / (x_std + xu_std) # (b k t)
+
+            # Here, we assume that the proportion of outside attention is unchanged after
+            # applying transposed convolution, which is not true, but hope that it approximates.
+            outside_contrib = patch_contrib * outside_attn_repeat
+            inside_patch_contrib = patch_contrib * (1 - outside_attn_repeat)
+
+            stats['outside_attn'] = outside_attn.mean().item()
+            stats['patch_contrib'] = patch_contrib.mean().item()
+            stats['outside_contrib'] = outside_contrib.mean().item()
+            stats['inside_patch_contrib'] = inside_patch_contrib.mean().item()
+
+        # let token and (unpatchified) patch embeddings communicate with each other
+        x = x + xu
+
+        return x, xp, stats
 
 @dataclass
 class GPTConfig:
@@ -173,6 +221,7 @@ class GPTConfig:
 
     sub_block_size: int = 1024
     patch_size: int = 8
+    compute_stats: bool = False
 
 class GPT(nn.Module):
 
@@ -256,8 +305,10 @@ class GPT(nn.Module):
         xp = self.transformer.drop(xp)
 
         # forward through transformer blocks
+        stats = []
         for block in self.transformer.h:
-            x, xp = block(x, xp)
+            x, xp, layer_stats = block(x, xp)
+            stats.append(layer_stats)
         x = self.transformer.ln_f(x)
 
         x = rearrange(x, 'b k t d -> b (k t) d') # merge back sub-blocks
@@ -272,7 +323,7 @@ class GPT(nn.Module):
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
             loss = None
 
-        return logits, loss
+        return logits, loss, stats
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
@@ -311,7 +362,7 @@ class GPT(nn.Module):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
+            logits, _, _ = self(idx_cond)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
             # optionally crop the logits to only the top k options
