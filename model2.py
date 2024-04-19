@@ -54,6 +54,8 @@ class CausalSelfAttention(nn.Module):
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
+            
+            # Only used for computing useful statistics
             if self.compute_stats:
                 # mask used to compute how much the patches pays attention to outside the sub-block
                 patch_per_sub_block = config.sub_block_size // config.patch_size
@@ -83,6 +85,8 @@ class CausalSelfAttention(nn.Module):
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
             att = F.softmax(att, dim=-1) # (B, nh, T, T)
+
+            # Compute useful statistics
             if self.compute_stats:
                 # Represents the amount of information contained in a token which comes
                 # from outside the current sub-block.
@@ -90,6 +94,7 @@ class CausalSelfAttention(nn.Module):
                 # computed on the character-level tokens because of batching (will be ignored afterwards).
                 outside_attn = att.masked_fill(self.inside_mask[:,:,:T,:T] == 0, 0.0)
                 outside_attn = outside_attn.sum(-1).mean(-2) # (B, T)
+
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
@@ -124,7 +129,13 @@ class Patchify(nn.Module):
         # self.downscale = nn.AvgPool1d(self.p, self.p)
 
     def forward(self, x):
-        """shape (b, k, t, n_embd) -> (b, t, n_embd)"""
+        """
+        shape (b, k, t, d) -> (b, t, d)
+        - b: batch size
+        - k: number of sub-blocks
+        - t: sub-block size
+        - d: embedding dimension
+        """
         x = rearrange(x, 'b k t d -> b (k t) d') # merge sub-blocks
         # shift x by p - 1 before patching to avoid information leak
         x = torch.roll(x, shifts=self.p - 1, dims=1)
@@ -152,7 +163,13 @@ class Unpatchify(nn.Module):
         # self.upscale = lambda x: repeat(x, 'b d t -> b d (t p)', p=p)
     
     def forward(self, xp):
-        """shape (b, t, n_embd) -> (b, k, t, n_embd)"""
+        """
+        shape (b, t, d) -> (b, k, t, d)
+        - b: batch size
+        - k: number of sub-blocks
+        - t: sub-block size
+        - d: embedding dimension
+        """
         xp = torch.transpose(xp, 2, 1)
         x = self.upscale(xp)
         x = rearrange(x, 'b d (k t) -> b k t d', t=self.sub_block_size) # split into sub-blocks
@@ -172,30 +189,38 @@ class Block(nn.Module):
 
     def forward(self, x, xp):
         """
-        x shape (b, k, t, n_embd)
-        xp shape (b, t, n_embd)
+        x shape (b, k, t, d)
+        xp shape (b, t, d)
+        - b: batch size
+        - k: number of sub-blocks
+        - t: sub-block size
+        - d: embedding dimension
         """
         # token and patch embeddings go through the same layers
         x, ps = pack([x, xp], '* t d')
-        z, outside_attn = self.attn(self.ln_1(x)) # (b, t, d), (b)
+        z, outside_attn = self.attn(self.ln_1(x)) # shape (b, t, d), (b)
         x = x + z
         x = x + self.mlp(self.ln_2(x))
         [x, xp] = unpack(x, ps, '* t d')
-        xu = self.unpatchify(xp) # (b, t, d) -> (b, k, t, d)
+        xu = self.unpatchify(xp) # shape (b, t, d) -> (b, k, t, d)
 
         # Compute some interesting statistics
         stats = {}
         if self.compute_stats:
             [_, outside_attn] = unpack(outside_attn, ps, '* t')
+            # This is to match the shape of character-level tokens
             outside_attn_repeat = repeat(outside_attn, 'b t -> b (t k)', k=xu.shape[1])
             outside_attn_repeat = rearrange(outside_attn_repeat, 'b (k t) -> b k t', k=xu.shape[1])
 
-            xu_std = xu.std(-1) # (b k t)
-            x_std = x.std(-1) # (b k t)
-            patch_contrib = xu_std / (x_std + xu_std) # (b k t)
+            # Compute the contribution of the patch-level tokens compared
+            # to that of the character-level tokens
+            xu_std = xu.std(-1) # shape (b, k, t)
+            x_std = x.std(-1) # shape (b, k, t)
+            patch_contrib = xu_std / (x_std + xu_std) # shape (b, k, t)
 
-            # Here, we assume that the proportion of outside attention is unchanged after
-            # applying transposed convolution, which is not true, but hope that it approximates.
+            # Here, to compute the contribution of the information from outside the sub-block,
+            # we assume that the proportion of outside attention is unchanged after
+            # applying transposed convolution, which is not true, but we hope that it approximates.
             outside_contrib = patch_contrib * outside_attn_repeat
             inside_patch_contrib = patch_contrib * (1 - outside_attn_repeat)
 
@@ -284,7 +309,7 @@ class GPT(nn.Module):
         
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, total_t, n_embd)
 
-        # pad tokens before splitting them into sub-blocks
+        # pad tokens before splitting them into sub-blocks (for inference time)
         modulo_t = total_t % sub_block_size
         if modulo_t:
             pad = sub_block_size - modulo_t
