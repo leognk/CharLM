@@ -182,11 +182,11 @@ class Stats:
     @staticmethod
     def average_stats(stats_list):
         """
-        Average the statistics contained in stats_list for each metric over the first axis.
+        Average the statistics contained in stats_list for each metric over the first axis (batch axis).
         Args:
-            - stats_list: list[list[dict]]
+            - stats_list: list[list[dict]]; size (batch, n_layers)
         Returns:
-            - avg_stats: dict[list]
+            - avg_stats: dict[list]; stats for each layer
         """
         avg_stats = {}
         metrics = stats_list[0][0].keys()
