@@ -1,7 +1,6 @@
 import os
 import zipfile
 import wget
-
 import pickle
 import numpy as np
 
