@@ -246,7 +246,8 @@ def estimate_loss():
             losses[k] = loss.item() / math.log(2)
             stats_lst.append(_stats)
         out[split] = losses.mean()
-        stats[split] = Stats(stats_lst)
+        if compute_stats:
+            stats[split] = Stats(stats_lst)
     model.train()
     return out, stats
 
@@ -255,5 +256,6 @@ timer = utils.Timer(max_iters)
 losses, stats = estimate_loss()
 print(f"test loss {losses['test']:.4f} | eval time {timer.timedelta()}")
 # display the statistics
-print(f"stats: {stats['test']}")
-stats['test'].plot(os.path.join(out_dir, 'stats'))
+if compute_stats:
+    print(f"stats: {stats['test']}")
+    stats['test'].plot(os.path.join(out_dir, 'stats'))
