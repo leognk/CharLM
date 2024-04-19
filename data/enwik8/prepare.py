@@ -1,10 +1,8 @@
 import os
-import sys
 import zipfile
 import wget
 
 import pickle
-import requests
 import numpy as np
 
 # download the enwik8 dataset
