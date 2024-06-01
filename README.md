@@ -45,4 +45,4 @@ Next, I assessed to what extend information from outside the current context win
   </tr>
 </table>
 
-We can see that patches bring information outside the current context window into the characters, which could explain parts of the improved performance with our model.
+We can see that patches bring information from outside the current context window into the characters, which could explain parts of the improved performance with our model.
