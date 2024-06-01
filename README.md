@@ -8,7 +8,7 @@ This model aims at improving the performance of the transformer by greatly facil
 
 ## Code
 
-The code is modified from karpathy/nanoGPT.
+The code is modified from [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT).
 - model.py / model2.py defines the vanilla / improved transformer model.
 - train.py / train2.py contains the training script for the vanilla / improved transformer.
 - test.py / test_2.py contains the testing script for the vanilla / improved transformer.
