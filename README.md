@@ -1,4 +1,4 @@
-# Improving Character-Level Transformer Language Models with Patches of Characters
+# Improving Character-Level Transformer Language Model with Patches of Characters
 
 ## Method
 
