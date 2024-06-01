@@ -36,17 +36,17 @@ Next, I assessed to what extend information from outside the current context win
 <table>
   <tr>
     <td align="center">
-      <h> ps=2-bs=8 </h>
+      ps=2-bs=8
       <br>
       <img src="stats/outside_contrib-p=2-b=8.png" width="300">
     </td>
     <td align="center">
-      <h> ps=2-bs=16 </h>
+      ps=2-bs=16
       <br>
       <img src="stats/outside_contrib-p=2-b=16.png" width="300">
     </td>
     <td align="center">
-      <h> ps=4-bs=16 </h>
+      ps=4-bs=16
       <br>
       <img src="stats/outside_contrib-p=4-b=16.png" width="300">
     </td>
