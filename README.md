@@ -25,7 +25,7 @@ We can see that our new model is better, but at the expense of longer training t
 
 Next, I assessed to what extend information from outside the current context window is incorporated into the haracter embeddings through the patch embeddings which possess larger range. To do this, I calculated the amount of attention paid by the patches outside the context window, and the amount of information transferred from the patch embeddings to the character embeddings, defined as the ratio of the standard deviation of the patch embeddings by the total standard deviation. These two quantities are multiplied together to obtain the amount of information incorporated from outside the context window into the character embeddings. Here are the bar plots visualizing this quantity for each transformer layer:
 
-<table>
+<table style="table-layout: fixed;">
   <tr>
     <td style="text-align:center;">
       ps=2-bs=8
