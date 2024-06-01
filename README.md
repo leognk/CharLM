@@ -20,7 +20,7 @@ The dataset used in the experiments is enwik8, which contains 100M bytes from En
 
 Here is a table comparing the vanilla transformer, which serves as the baseline, and our improved transformer. The performance metric is bits per byte (bpb) (lower is better). "bs" stands for batch size and "ps" for patch size.
 
-| Model                     | Num tokens <br> seen per iter | Parameters | Training time <br> with one L4 GPU | bpb   |
+| Model                     | Num tokens <br> seen per iter | Parameters | Training time <br> for one L4 GPU | bpb   |
 |---------------------------|-------------------------------|------------|---------------|-------|
 | nanoGPT <br> bs=16        | 16k                           | 38M        | 12h           | 1.148 |
 | New model <br> ps=2-bs=8  | 16k                           | 45M        | 19h           | 1.127 |
