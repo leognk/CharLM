@@ -21,11 +21,11 @@ The dataset used in the experiments is enwik8, which contains 100M bytes from En
 Here is a table comparing the vanilla transformer, which serves as the baseline, and our improved transformer. The performance metric is bits per byte (bpb) (lower is better). "bs" stands for batch size and "ps" for patch size.
 
 | Model                     | Num tokens <br> seen per iter | Parameters | Training time <br> for one L4 GPU | bpb   |
-|---------------------------|-------------------------------|------------|---------------|-------|
-| nanoGPT <br> bs=16        | 16k                           | 38M        | 12h           | 1.148 |
-| New model <br> ps=2-bs=8  | 16k                           | 45M        | 19h           | 1.127 |
-| New model <br> ps=2-bs=16 | 32k                           | 45M        | 38h           | 1.112 |
-| New model <br> ps=4-bs=16 | 65k                           | 52M        | 50h           | 1.096 |
+|---------------------------|-------------------------------|------------|-----------------------------------|-------|
+| nanoGPT <br> bs=16        | 16k                           | 38M        | 12h                               | 1.148 |
+| New model <br> ps=2-bs=8  | 16k                           | 45M        | 19h                               | 1.127 |
+| New model <br> ps=2-bs=16 | 32k                           | 45M        | 38h                               | 1.112 |
+| New model <br> ps=4-bs=16 | 65k                           | 52M        | 50h                               | 1.096 |
 
 We can see that our new model is better, but at the expense of longer training time and more parameters due to the additional convolutions and transposed convolutions. Furthermore, I believe the baseline can further be improved with more training iterations, so the comparison might not be entirely fair. With this in mind, we can still observe a significant improvement when we incorporate patch-level information into the character embeddings.
 
